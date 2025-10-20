@@ -1,0 +1,89 @@
+version: '3.8'
+
+# AList File Manager with Keycloak OAuth2 Authentication
+# Architecture: Backend isolation pattern (3-network OAuth2 proxy)
+#
+# Network topology:
+#   traefik-net:   OAuth2 proxy receives HTTPS traffic from Traefik
+#   keycloak-net:  OAuth2 proxy validates authentication with Keycloak
+#   alist-net:     OAuth2 proxy forwards authenticated requests to AList backend
+#
+# Security: AList backend is NOT on traefik-net (isolated, no direct access)
+
+networks:
+  traefik-net:
+    external: true
+  keycloak-net:
+    external: true
+  alist-net:
+    external: false
+
+services:
+  # ============================================================================
+  # AList Backend - File Manager Application
+  # ============================================================================
+  # Network: alist-net ONLY (backend isolation)
+  # Port: 5244 (internal, not exposed to host)
+  # Data: Persistent volume for database and config
+  # Mounts: Read-only access to projects and agent workspaces
+
+  alist:
+    container_name: alist
+    image: xhofe/alist:latest
+    restart: unless-stopped
+    networks:
+      - alist-net
+    volumes:
+      # Persistent data (read-write)
+      - /home/administrator/projects/data/alist:/opt/alist/data
+
+      # Browseable directories (read-only)
+      - /home/administrator/projects:/mnt/projects:ro
+      - /home/administrator/data/claudeagents:/mnt/claudeagents:ro
+    env_file:
+      - /home/administrator/projects/secrets/alist.env
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5244/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # OAuth2 Proxy - Authentication Gateway
+  # ============================================================================
+  # Networks: traefik-net (web) + keycloak-net (auth) + alist-net (backend)
+  # Port: 4180 (OAuth2 proxy standard port)
+  # Purpose: Enforce Keycloak SSO authentication before allowing access
+  # Groups: administrators, developers (both have access)
+
+  alist-auth-proxy:
+    container_name: alist-auth-proxy
+    image: quay.io/oauth2-proxy/oauth2-proxy:latest
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    env_file:
+      - /home/administrator/projects/secrets/alist-oauth2.env
+    environment:
+      # Upstream configuration (points to AList backend)
+      - OAUTH2_PROXY_UPSTREAMS=http://alist:5244
+      - OAUTH2_PROXY_PASS_HOST_HEADER=false
+      - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
+    labels:
+      # Traefik routing configuration
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
+
+      # Router configuration
+      - "traefik.http.routers.alist-auth-proxy.rule=Host(`alist.ai-servicers.com`)"
+      - "traefik.http.routers.alist-auth-proxy.entrypoints=websecure"
+      - "traefik.http.routers.alist-auth-proxy.tls=true"
+      - "traefik.http.routers.alist-auth-proxy.tls.certresolver=letsencrypt"
+
+      # Service configuration
+      - "traefik.http.services.alist-auth-proxy.loadbalancer.server.port=4180"
