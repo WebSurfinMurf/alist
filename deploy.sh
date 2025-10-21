@@ -33,9 +33,17 @@ if [ ! -f "$HOME/projects/secrets/${PROJECT_NAME}-oauth2.env" ]; then
     exit 1
 fi
 
-# Load environment variables to validate
+# Load environment variables for validation and docker-compose substitution
+set -a  # Export all variables
 source "$HOME/projects/secrets/${PROJECT_NAME}.env"
 source "$HOME/projects/secrets/${PROJECT_NAME}-oauth2.env"
+
+# Dynamically resolve Traefik IP for extra_hosts configuration
+TRAEFIK_IP=$(docker inspect traefik --format '{{range $net, $conf := .NetworkSettings.Networks}}{{if eq $net "traefik-net"}}{{.IPAddress}}{{end}}{{end}}' 2>/dev/null || echo "172.25.0.6")
+export TRAEFIK_IP
+echo -e "${YELLOW}Using Traefik IP: $TRAEFIK_IP${NC}"
+
+set +a  # Stop exporting
 
 # Verify Keycloak client secret is configured
 if [ -z "$OAUTH2_PROXY_CLIENT_SECRET" ] || [ "$OAUTH2_PROXY_CLIENT_SECRET" = "<CLIENT_SECRET_FROM_KEYCLOAK>" ]; then
@@ -83,6 +91,7 @@ echo -e "${GREEN}✓ All required networks exist${NC}"
 
 echo -e "${YELLOW}Creating data directories...${NC}"
 mkdir -p "$HOME/projects/data/alist"
+mkdir -p "$HOME/projects/data/uploads"
 
 echo -e "${GREEN}✓ Data directories ready${NC}"
 
@@ -130,15 +139,18 @@ docker ps | grep alist
 echo ""
 echo -e "${GREEN}=== Network Verification ===${NC}"
 
-# Verify AList is ONLY on alist-net (backend isolation)
+# Verify AList is on alist-net and traefik-net (dual access)
 ALIST_NETWORKS=$(docker inspect alist --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}')
 echo "AList networks: $ALIST_NETWORKS"
 
-if echo "$ALIST_NETWORKS" | grep -q "traefik-net"; then
-    echo -e "${RED}⚠ WARNING: AList is on traefik-net (should not be!)${NC}"
-else
-    echo -e "${GREEN}✓ AList correctly isolated on alist-net only${NC}"
-fi
+REQUIRED_ALIST_NETWORKS=("alist-net" "traefik-net")
+for net in "${REQUIRED_ALIST_NETWORKS[@]}"; do
+    if echo "$ALIST_NETWORKS" | grep -q "$net"; then
+        echo -e "${GREEN}✓ AList on $net${NC}"
+    else
+        echo -e "${RED}✗ AList NOT on $net${NC}"
+    fi
+done
 
 # Verify OAuth2 proxy is on all 3 networks
 PROXY_NETWORKS=$(docker inspect alist-auth-proxy --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}')

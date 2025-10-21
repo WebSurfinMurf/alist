@@ -16,7 +16,6 @@ networks:
   keycloak-net:
     external: true
   alist-net:
-    external: false
 
 services:
   # ============================================================================
@@ -33,25 +32,34 @@ services:
     restart: unless-stopped
     networks:
       - alist-net
+      - keycloak-net
+      - traefik-net
+    extra_hosts:
+      # Override DNS to route external domain to internal Traefik
+      # IP is dynamically resolved from traefik container at deploy time
+      - "keycloak.ai-servicers.com:${TRAEFIK_IP:-172.25.0.6}"
     volumes:
       # Persistent data (read-write)
       - /home/administrator/projects/data/alist:/opt/alist/data
 
       # Browseable directories (read-only)
       - /home/administrator/projects:/mnt/projects:ro
-      - /home/administrator/data/claudeagents:/mnt/claudeagents:ro
+
+      # Writable uploads directory
+      - /home/administrator/projects/data/uploads:/mnt/uploads
     env_file:
       - /home/administrator/projects/secrets/alist.env
     environment:
-      - PUID=1000
-      - PGID=1000
+      - PUID=2000
+      - PGID=2000
       - UMASK=022
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5244/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    labels:
+      # Internal access without OAuth2 (direct to AList)
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
+      - "traefik.http.routers.alist-internal.rule=Host(`alist.linuxserver.lan`)"
+      - "traefik.http.routers.alist-internal.entrypoints=web"
+      - "traefik.http.services.alist-internal.loadbalancer.server.port=5244"
 
   # ============================================================================
   # OAuth2 Proxy - Authentication Gateway
@@ -66,14 +74,60 @@ services:
     image: quay.io/oauth2-proxy/oauth2-proxy:latest
     restart: unless-stopped
     networks:
+      - alist-net
+      - keycloak-net
       - traefik-net
-    env_file:
-      - /home/administrator/projects/secrets/alist-oauth2.env
     environment:
-      # Upstream configuration (points to AList backend)
+      # OAuth2 Provider Configuration
+      - OAUTH2_PROXY_PROVIDER=keycloak-oidc
+      - OAUTH2_PROXY_CLIENT_ID=alist
+      - OAUTH2_PROXY_CLIENT_SECRET=${OAUTH2_PROXY_CLIENT_SECRET}
+      - OAUTH2_PROXY_COOKIE_SECRET=${OAUTH2_PROXY_COOKIE_SECRET}
+      - OAUTH2_PROXY_COOKIE_NAME=_alist_oauth2_proxy
+
+      # Keycloak Configuration (Hybrid URL Strategy)
+      - OAUTH2_PROXY_OIDC_ISSUER_URL=https://keycloak.ai-servicers.com/realms/master
+      - OAUTH2_PROXY_LOGIN_URL=https://keycloak.ai-servicers.com/realms/master/protocol/openid-connect/auth
+      - OAUTH2_PROXY_REDEEM_URL=http://keycloak:8080/realms/master/protocol/openid-connect/token
+      - OAUTH2_PROXY_OIDC_JWKS_URL=http://keycloak:8080/realms/master/protocol/openid-connect/certs
+      - OAUTH2_PROXY_SKIP_OIDC_DISCOVERY=true
+      - OAUTH2_PROXY_REDIRECT_URL=https://alist.ai-servicers.com/oauth2/callback
+
+      # Group Authorization
+      - OAUTH2_PROXY_OIDC_GROUPS_CLAIM=groups
+      - OAUTH2_PROXY_ALLOWED_GROUPS=/administrators,/developers
+
+      # Scope Configuration
+      - OAUTH2_PROXY_SCOPE=openid profile email groups
+
+      # Upstream Configuration
       - OAUTH2_PROXY_UPSTREAMS=http://alist:5244
-      - OAUTH2_PROXY_PASS_HOST_HEADER=false
       - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
+
+      # Cookie Configuration
+      - OAUTH2_PROXY_EMAIL_DOMAINS=*
+      - OAUTH2_PROXY_COOKIE_SECURE=true
+      - OAUTH2_PROXY_COOKIE_HTTPONLY=true
+      - OAUTH2_PROXY_COOKIE_SAMESITE=lax
+
+      # Pass Authentication Headers to Backend
+      # NOTE: Disabled token passing - AList has its own authentication system
+      # - OAUTH2_PROXY_PASS_ACCESS_TOKEN=true
+      # - OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER=true
+      # - OAUTH2_PROXY_SET_XAUTHREQUEST=true
+      # - OAUTH2_PROXY_PASS_USER_HEADERS=true
+      - OAUTH2_PROXY_PASS_HOST_HEADER=true
+
+      # Additional Configuration
+      - OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL=true
+      - OAUTH2_PROXY_PROVIDER_DISPLAY_NAME=Keycloak SSO
+
+      # Debug Logging
+      - OAUTH2_PROXY_LOGGING_LEVEL=debug
+      - OAUTH2_PROXY_STANDARD_LOGGING=true
+      - OAUTH2_PROXY_REQUEST_LOGGING=true
+      - OAUTH2_PROXY_AUTH_LOGGING=true
+      - OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR=true
     labels:
       # Traefik routing configuration
       - "traefik.enable=true"
