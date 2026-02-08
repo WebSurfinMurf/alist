@@ -236,12 +236,13 @@ docker compose down
 
 1. **Access AList** via https://alist.ai-servicers.com
 2. **Keycloak Login**: Authenticate with your account (must be in developers or administrators group)
-3. **AList Login**: After OAuth2, login to AList:
+3. **Browse Directories**: After OAuth2, you're in as guest (read-only) - no separate alist login needed
+   - `/projects` - All infrastructure projects (read-only)
+   - `/uploads` - Shared uploads
+   - `/dev-projects` - Developer projects
+4. **Admin Access** (optional): Login via alist's own login for admin operations:
    - Username: `admin`
    - Password: See `$HOME/projects/secrets/alist.env`
-4. **Browse Directories**: Navigate to mounted paths:
-   - `/mnt/projects` - All infrastructure projects (read-only)
-   - `/mnt/claudeagents` - Agent workspaces (read-only)
 
 ### Admin Password Reset
 
@@ -590,7 +591,8 @@ docker stats alist
 
 **AList Permissions:**
 - Admin account: Full control over all storages and settings
-- Guest access: Disabled (OAuth2 required)
+- Guest access: Enabled (read-only browsing after OAuth2 login - no separate alist login needed)
+- SSO users: Auto-registered with permission 63 (read/write)
 - Read-only mounts: Projects and agent workspaces are read-only
 
 ### Secret Management
@@ -752,6 +754,25 @@ All resources use the name **alist**:
 
 ---
 
+### 2026-02-05 - Guest Read-Only Access for AI Board Review Links
+
+**Problem:** HTML pages from `/createsolution`, `/createplan`, `/createreview` workflows link to markdown artifacts hosted on alist (e.g., `https://alist.ai-servicers.com/projects/ainotes/shared/createsolution/aiagentchat.final.md`). After Keycloak OAuth2 login, users hit alist's own "token expired" login page because of two-layer authentication.
+
+**Root Cause:** Two layers of auth - Keycloak OAuth2 (external gate) AND alist's own JWT token system. After passing Keycloak, users still needed to login to alist separately. Expired alist tokens in browser localStorage caused "token expired" error.
+
+**Solution Applied:**
+1. **`sign_all` → `false`**: Disabled alist URL signing for file downloads. Keycloak OAuth2 is the access gate, so alist's own URL signing is unnecessary. Set via admin API.
+2. **`customize_head` script**: Injected JavaScript in alist SPA `<head>` that checks localStorage for expired alist JWT tokens and removes them, forcing the SPA to operate in guest mode. This prevents the "token expired" login page.
+3. **Guest user**: Already had `permission: 7` (read access). No changes needed to user permissions.
+
+**Result:** After Keycloak OAuth2 login, users browse alist in guest mode (read-only). Markdown files render as HTML via alist's built-in markdown renderer. No separate alist login required.
+
+**Settings Changed (via alist admin API, persisted in SQLite):**
+- `sign_all`: `true` → `false`
+- `customize_head`: Added expired-token cleanup script
+
+---
+
 *Document created: 2025-10-20*
-*Last updated: 2025-10-20*
+*Last updated: 2026-02-05*
 *Maintained by: Claude Code*
