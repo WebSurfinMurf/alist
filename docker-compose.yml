@@ -15,6 +15,8 @@ networks:
     external: true
   keycloak-net:
     external: true
+  minio-net:
+    external: true
   alist-net:
 
 services:
@@ -34,6 +36,7 @@ services:
       - alist-net
       - keycloak-net
       - traefik-net
+      - minio-net
     extra_hosts:
       # Override DNS to route external domain to internal Traefik
       # IP is dynamically resolved from traefik container at deploy time
