@@ -22,7 +22,7 @@ AList is a powerful file list program that supports multiple storage providers, 
 2. **OAuth2 Proxy (latest)** - Authentication gateway
    - Container: `alist-auth-proxy`
    - External port: 4180 (via Traefik)
-   - Networks: `alist-net`, `keycloak-net`, `traefik-net`
+   - Networks: `alist-net`, `keycloak-net`, `traefik-net`, `minio-net`
    - Keycloak integration with hybrid URL strategy
    - 3-network pattern for backend isolation
 
@@ -33,15 +33,16 @@ Internet → Traefik (traefik-net)
               ↓
          OAuth2 Proxy (traefik-net + keycloak-net + alist-net)
               ↓
-         AList Backend (alist-net ONLY - isolated)
+         AList Backend (alist-net + minio-net)
 ```
 
 **Security Architecture:**
 - **Backend Isolation**: AList is NOT on traefik-net (no direct external access)
-- **3-Network OAuth2 Pattern**:
+- **4-Network Pattern**:
   - traefik-net: Receives HTTPS traffic from Traefik
   - keycloak-net: Validates authentication with Keycloak
   - alist-net: Forwards authenticated requests to backend
+  - minio-net: S3 access to MinIO for aichat-files bucket
 - **Hybrid URL Strategy**: Browser URLs use HTTPS, backend URLs use internal HTTP
 - **Group-Based Access**: Both administrators and developers groups have access
 
@@ -773,6 +774,23 @@ All resources use the name **alist**:
 
 ---
 
+### 2026-02-10 - MinIO aichat-files S3 Storage Mount
+
+**Changes:**
+- Added `minio-net` to alist container in docker-compose.yml (4th network)
+- Configured S3 storage mount `/aichat-files` via alist admin API:
+  - Driver: S3
+  - Bucket: `aichat-files`
+  - Endpoint: `http://minio:9000` (internal via minio-net)
+  - Credentials: MinIO root
+  - Force path style: true
+  - List object version: v2
+- Purpose: Browse inter-agent file sharing bucket at `https://alist.ai-servicers.com/aichat-files/`
+- Bucket has 7-day auto-expiry lifecycle
+- Key convention: `{participant-name}/filename`
+
+---
+
 *Document created: 2025-10-20*
-*Last updated: 2026-02-05*
+*Last updated: 2026-02-10*
 *Maintained by: Claude Code*
