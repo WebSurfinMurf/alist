@@ -48,6 +48,7 @@ services:
       # Browseable directories (read-only)
       - /home/administrator/projects:/mnt/projects:ro
       - /home/websurfinmurf/projects:/mnt/dev-projects:ro
+      - /home/joe/projects:/mnt/joe-projects:ro
 
       # Writable uploads directory
       - /home/administrator/projects/data/uploads:/mnt/uploads
