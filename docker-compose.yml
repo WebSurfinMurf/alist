@@ -45,10 +45,10 @@ services:
       # Persistent data (read-write)
       - /home/administrator/projects/data/alist:/opt/alist/data
 
-      # Browseable directories (read-only)
+      # Browseable directories
       - /home/administrator/projects:/mnt/projects:ro
-      - /home/websurfinmurf/projects:/mnt/dev-projects:ro
-      - /home/joe/projects:/mnt/joe-projects:ro
+      - /home/websurfinmurf/projects:/mnt/dev-projects
+      - /home/joe/projects:/mnt/joe-projects
 
       # Writable uploads directory
       - /home/administrator/projects/data/uploads:/mnt/uploads
