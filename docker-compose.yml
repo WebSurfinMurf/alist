@@ -52,6 +52,9 @@ services:
 
       # Writable uploads directory
       - /home/administrator/projects/data/uploads:/mnt/uploads
+
+      # Scans directory (from Brother scanner)
+      - /mnt/shared/scans:/mnt/scans:ro
     env_file:
       - /home/administrator/projects/secrets/alist.env
     environment:
