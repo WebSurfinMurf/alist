@@ -774,6 +774,27 @@ All resources use the name **alist**:
 
 ---
 
+### 2026-05-09 - Codified `customize_head` and removed broken external md-viewer
+
+**Problem:** Clicking an `.md` file used to render inline. Then it broke — clicking opened a new tab to `https://nginx.ai-servicers.com/md-viewer/?url=...` which returned 404 (the route doesn't exist; never has, per `nginx-portal.conf` git history). Compounding this, the nginx container itself had been crash-looping ~4,380 times because someone ran `docker restart nginx` after the container was recreated, which dropped the `--add-host host.docker.internal:host-gateway` flag — making nginx-portal.conf:157 fail (`/agent-memory/analyze` proxy can't resolve `host.docker.internal`).
+
+**Root cause of drift:** Two systemic issues —
+1. `customize_head` is stored only in alist's `data.db` SQLite, not in git. Someone added an external-viewer redirect script via the admin UI, on top of the original token-cleanup-only design (2026-02-05). No code review, no diff, no audit trail.
+2. nginx was deployed via raw `docker run` with `--add-host` only set on first deploy; `docker restart` after container recreation lost it.
+
+**Why the external viewer was unnecessary:** alist's bundled web frontend (v3.53.0, shipped with v3.54.0) has **native** support for mermaid diagrams (`insertMermaidJS()` auto-loads `mermaid@11` from CDN), KaTeX math, GFM tables/task lists, and syntax highlighting. The `customize_head` redirect was solving a problem alist already solves out of the box.
+
+**Solution Applied:**
+1. **Codified `customize_head` in git:** `assets/customize_head.html` is the source of truth; contents = the token-cleanup script (still required for guest mode). `apply-settings.sh` logs into the alist admin API and re-applies it after every `deploy.sh` run, so UI edits get reverted on next deploy. Also enforces `sign_all=false`.
+2. **Removed external-viewer script** from the live `customize_head`. Clicking `.md` now uses alist's built-in renderer (in-page, with mermaid).
+3. **Migrated `nginx` to `docker-compose.yml`** (in `projects/nginx`) so `extra_hosts` survives container recreation. `docker restart nginx` and `docker compose up -d` are now both safe.
+
+**Operating note:** `customize_head` and `sign_all` should be edited via `assets/customize_head.html` + `./deploy.sh`, NOT via the alist admin UI. UI edits will be silently reverted on next deploy.
+
+**Followup same day — upgraded v3.54.0 → v3.60.0:** While testing the cleanup, hit a separate bug: section 2 of `traefik/docs/acme-renewal-2026-05-08/PLAN.md` rendered as run-on text. Root cause was alist's `/p/` endpoint server-renders markdown without GFM in v3.54.0, so pipe-tables come back as `<p>| Cert | Expires | ... |</p>` instead of `<table>`. The frontend can't recover from broken HTML (the original external-viewer's `innerText` round-trip was specifically a workaround for this). v3.59.0 commit "Enable GFM extension for markdown rendering in proxy mode" fixes it server-side. Upgrade was: `docker compose pull alist && docker compose up -d alist`. data.db backed up to `data.db.backup.20260509-075135`. Storages reloaded cleanly; settings re-applied via `apply-settings.sh`. Tables, fenced code, mermaid all render correctly now.
+
+---
+
 ### 2026-02-10 - MinIO aichat-files S3 Storage Mount
 
 **Changes:**

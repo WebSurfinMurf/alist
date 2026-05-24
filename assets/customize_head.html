@@ -1,0 +1,19 @@
+<script>
+(function(){
+  try {
+    var token = localStorage.getItem("token");
+    if (token) {
+      var parts = token.split(".");
+      if (parts.length === 3) {
+        var payload = JSON.parse(atob(parts[1]));
+        if (payload.exp && payload.exp * 1000 < Date.now()) {
+          localStorage.removeItem("token");
+          console.log("[AList] Cleared expired token, using guest mode");
+        }
+      }
+    }
+  } catch(e) {
+    localStorage.removeItem("token");
+  }
+})();
+</script>

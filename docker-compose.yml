@@ -32,6 +32,11 @@ services:
     container_name: alist
     image: xhofe/alist:latest
     restart: unless-stopped
+    # Run alist as joe (uid/gid 1002) via the entrypoint's PUID/PGID drop, so
+    # uploads to /home/joe/projects are owned by joe. Tradeoff during the
+    # alist→openlist transition: alist cannot write to /home/websurfinmurf/projects
+    # (1000:1000) — wsm uploads via alist will fail. /opt/alist/data and
+    # /mnt/uploads are chown'd to 1002:1002 to match.
     networks:
       - alist-net
       - keycloak-net
@@ -58,8 +63,8 @@ services:
     env_file:
       - /home/administrator/projects/secrets/alist.env
     environment:
-      - PUID=2000
-      - PGID=2000
+      - PUID=1002
+      - PGID=1002
       - UMASK=022
     labels:
       # Internal access without OAuth2 (direct to AList)
